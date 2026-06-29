@@ -1,0 +1,46 @@
+name: Build desktop installers
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: corepack enable
+      - run: bash packaging/build_macos.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Paperdown-macOS
+          path: outputs/Paperdown-macOS.dmg
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: corepack enable
+      - name: Install Inno Setup
+        run: choco install innosetup --yes --no-progress
+      - name: Build Windows installer
+        shell: powershell
+        run: .\packaging\build_windows.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Paperdown-Windows
+          path: outputs/Paperdown-Windows-Setup.exe

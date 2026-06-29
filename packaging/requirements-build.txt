@@ -1,0 +1,8 @@
+pyinstaller==6.21.0
+pywebview==6.2.1
+pyobjc-core==11.1; platform_system == "Darwin"
+pyobjc-framework-Cocoa==11.1; platform_system == "Darwin"
+pyobjc-framework-Quartz==11.1; platform_system == "Darwin"
+pyobjc-framework-Security==11.1; platform_system == "Darwin"
+pyobjc-framework-UniformTypeIdentifiers==11.1; platform_system == "Darwin"
+pyobjc-framework-WebKit==11.1; platform_system == "Darwin"
