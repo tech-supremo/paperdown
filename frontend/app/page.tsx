@@ -28,6 +28,19 @@ type BatchItem = {
   error?: string;
 };
 
+declare global {
+  interface Window {
+    pywebview?: {
+      api?: {
+        save_markdown: (filename: string, content: string) => Promise<boolean>;
+        save_zip: (
+          files: Array<{ path: string; content: string }>,
+        ) => Promise<boolean>;
+      };
+    };
+  }
+}
+
 function fileSize(bytes: number) {
   return bytes < 1024 * 1024
     ? `${Math.ceil(bytes / 1024)} KB`
@@ -61,6 +74,19 @@ export default function Home() {
 
   useEffect(() => {
     folderInputRef.current?.setAttribute("webkitdirectory", "");
+
+    const preventWebViewNavigation = (event: Event) => {
+      event.preventDefault();
+    };
+    window.addEventListener("dragenter", preventWebViewNavigation, true);
+    window.addEventListener("dragover", preventWebViewNavigation, true);
+    window.addEventListener("drop", preventWebViewNavigation, true);
+
+    return () => {
+      window.removeEventListener("dragenter", preventWebViewNavigation, true);
+      window.removeEventListener("dragover", preventWebViewNavigation, true);
+      window.removeEventListener("drop", preventWebViewNavigation, true);
+    };
   }, []);
 
   const activeItem = useMemo(
@@ -211,11 +237,22 @@ export default function Home() {
     setLoading(false);
   }
 
-  function downloadOne(item: BatchItem) {
+  async function downloadOne(item: BatchItem) {
     if (!item.result) return;
+    const filename =
+      markdownPath(item).split("/").pop() ?? item.result.filename;
+    const nativeSave = window.pywebview?.api?.save_markdown;
+    if (nativeSave) {
+      try {
+        await nativeSave(filename, item.result.markdown);
+      } catch {
+        setError("The Markdown file could not be saved.");
+      }
+      return;
+    }
     downloadBlob(
       new Blob([item.result.markdown], { type: "text/markdown;charset=utf-8" }),
-      markdownPath(item).split("/").pop() ?? item.result.filename,
+      filename,
     );
   }
 
@@ -223,7 +260,18 @@ export default function Home() {
     const ready = items.filter((item) => item.result);
     if (!ready.length || zipping) return;
     setZipping(true);
+    setError("");
     try {
+      const nativeSave = window.pywebview?.api?.save_zip;
+      if (nativeSave) {
+        await nativeSave(
+          ready.map((item) => ({
+            path: markdownPath(item),
+            content: item.result!.markdown,
+          })),
+        );
+        return;
+      }
       const JSZip = (await import("jszip")).default;
       const zip = new JSZip();
       ready.forEach((item) => zip.file(markdownPath(item), item.result!.markdown));
@@ -233,6 +281,8 @@ export default function Home() {
         compressionOptions: { level: 6 },
       });
       downloadBlob(blob, "paperdown-markdown.zip");
+    } catch {
+      setError("The ZIP file could not be saved.");
     } finally {
       setZipping(false);
     }
@@ -270,9 +320,18 @@ export default function Home() {
         <div className="upload-column">
           <div
             className={`dropzone ${dragging ? "dragging" : ""} ${items.length ? "has-file" : ""}`}
-            onDragEnter={() => setDragging(true)}
-            onDragLeave={() => setDragging(false)}
-            onDragOver={(event) => event.preventDefault()}
+            onDragEnter={(event) => {
+              event.preventDefault();
+              setDragging(true);
+            }}
+            onDragLeave={(event) => {
+              event.preventDefault();
+              setDragging(false);
+            }}
+            onDragOver={(event) => {
+              event.preventDefault();
+              event.dataTransfer.dropEffect = "copy";
+            }}
             onDrop={onDrop}
           >
             <input
@@ -399,7 +458,7 @@ export default function Home() {
                     Source
                   </button>
                 </div>
-                <button className="download-button" onClick={() => downloadOne(activeItem)}>
+                <button className="download-button" onClick={() => void downloadOne(activeItem)}>
                   Download .md
                 </button>
               </div>

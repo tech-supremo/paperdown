@@ -59,7 +59,7 @@ if platform.system() == "Darwin":
         bundle_identifier="com.paperdown.desktop",
         info_plist={
             "CFBundleDisplayName": "Paperdown",
-            "CFBundleShortVersionString": "1.0.0",
+            "CFBundleShortVersionString": "1.0.1",
             "NSHighResolutionCapable": True,
         },
     )
