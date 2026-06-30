@@ -160,6 +160,10 @@ h1 {
   transform: translateY(-2px);
 }
 
+.dropzone.dragging > * {
+  pointer-events: none;
+}
+
 .dropzone.has-file {
   border-style: solid;
 }

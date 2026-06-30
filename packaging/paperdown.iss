@@ -1,5 +1,5 @@
 #define MyAppName "Paperdown"
-#define MyAppVersion "1.0.1"
+#define MyAppVersion "1.0.2"
 #define MyAppPublisher "Paperdown"
 #define MyAppExeName "Paperdown.exe"
 

@@ -64,6 +64,7 @@ function markdownPath(item: BatchItem) {
 export default function Home() {
   const filesInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
+  const dragDepthRef = useRef(0);
   const [items, setItems] = useState<BatchItem[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [error, setError] = useState("");
@@ -75,17 +76,16 @@ export default function Home() {
   useEffect(() => {
     folderInputRef.current?.setAttribute("webkitdirectory", "");
 
-    const preventWebViewNavigation = (event: Event) => {
-      event.preventDefault();
+    const preventUnhandledDrop = (event: globalThis.DragEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element) || !target.closest(".dropzone")) {
+        event.preventDefault();
+      }
     };
-    window.addEventListener("dragenter", preventWebViewNavigation, true);
-    window.addEventListener("dragover", preventWebViewNavigation, true);
-    window.addEventListener("drop", preventWebViewNavigation, true);
+    window.addEventListener("drop", preventUnhandledDrop);
 
     return () => {
-      window.removeEventListener("dragenter", preventWebViewNavigation, true);
-      window.removeEventListener("dragover", preventWebViewNavigation, true);
-      window.removeEventListener("drop", preventWebViewNavigation, true);
+      window.removeEventListener("drop", preventUnhandledDrop);
     };
   }, []);
 
@@ -157,6 +157,7 @@ export default function Home() {
 
   function onDrop(event: DragEvent<HTMLDivElement>) {
     event.preventDefault();
+    dragDepthRef.current = 0;
     setDragging(false);
     addFiles(event.dataTransfer.files);
   }
@@ -322,11 +323,17 @@ export default function Home() {
             className={`dropzone ${dragging ? "dragging" : ""} ${items.length ? "has-file" : ""}`}
             onDragEnter={(event) => {
               event.preventDefault();
-              setDragging(true);
+              dragDepthRef.current += 1;
+              if (dragDepthRef.current === 1) {
+                setDragging(true);
+              }
             }}
             onDragLeave={(event) => {
               event.preventDefault();
-              setDragging(false);
+              dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+              if (dragDepthRef.current === 0) {
+                setDragging(false);
+              }
             }}
             onDragOver={(event) => {
               event.preventDefault();
