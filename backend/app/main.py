@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from .converter import EmptyPDFError, pdf_to_markdown
+from .converter import EmptyPDFError, GraphicsLimitError, convert_document
 
 
 MAX_FILE_SIZE = 25 * 1024 * 1024
@@ -30,10 +30,16 @@ app.add_middleware(
 )
 
 
+class ImageResponse(BaseModel):
+    path: str
+    content: str
+
+
 class ConversionResponse(BaseModel):
     filename: str
     markdown: str
     page_count: int
+    images: list[ImageResponse]
 
 
 def _markdown_filename(filename: str | None) -> str:
@@ -99,12 +105,15 @@ async def convert_pdf(file: UploadFile = File(...)) -> ConversionResponse:
                 detail=f"PDF has too many pages. The maximum is {MAX_PAGES} pages.",
             )
 
-        markdown = pdf_to_markdown(document)
+        result = convert_document(document)
         return ConversionResponse(
             filename=_markdown_filename(filename),
-            markdown=markdown,
+            markdown=result.markdown,
+            images=[ImageResponse(path=image.path, content=image.content) for image in result.images],
             page_count=document.page_count,
         )
+    except GraphicsLimitError as exc:
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
     except EmptyPDFError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     finally:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import re
 import statistics
 from dataclasses import dataclass
@@ -26,6 +27,7 @@ class Line:
     size: float
     is_bold: bool
     y: float
+    is_image: bool = False
 
 
 def _clean_inline_text(text: str) -> str:
@@ -36,7 +38,7 @@ def _clean_inline_text(text: str) -> str:
 
 def _extract_lines(page: fitz.Page) -> list[Line]:
     """Return positioned text lines, preserving basic font information."""
-    page_data = page.get_text("dict", sort=True)
+    page_data = page.get_text("dict", sort=True, flags=fitz.TEXTFLAGS_DICT & ~fitz.TEXT_PRESERVE_IMAGES)
     lines: list[Line] = []
 
     for block in page_data.get("blocks", []):
@@ -130,6 +132,9 @@ def _page_to_markdown(lines: list[Line], body_size: float) -> list[str]:
     output: list[str] = []
 
     for line in lines:
+        if line.is_image:
+            output.extend(["", line.text, ""])
+            continue
         heading = _heading_level(line, body_size)
         list_item = _as_list_item(line.text)
 
@@ -157,20 +162,89 @@ def _page_to_markdown(lines: list[Line], body_size: float) -> list[str]:
     return output
 
 
-def pdf_to_markdown(document: fitz.Document) -> str:
-    """Convert an open PDF document to Markdown with page comments."""
-    pages = [_extract_lines(page) for page in document]
-    if not any(pages):
-        raise EmptyPDFError(
-            "This PDF contains no extractable text. It may be empty or image-only."
-        )
+@dataclass(frozen=True)
+class ImageAsset:
+    path: str
+    content: str  # Base64 PNG, shared by browser and desktop ZIP writers.
 
+
+@dataclass(frozen=True)
+class Conversion:
+    markdown: str
+    images: list[ImageAsset]
+
+
+class GraphicsLimitError(ValueError):
+    """Raised when a PDF would produce an oversized graphics bundle."""
+
+
+MAX_IMAGE_BYTES = 32 * 1024 * 1024
+MAX_IMAGE_COUNT = 1000
+
+
+def convert_document(document: fitz.Document) -> Conversion:
+    """Preserve text and visible graphics without OCR or external services.
+
+    Embedded images become page crops so transparency, masks and transforms
+    match the PDF. Vector drawings use a full-page snapshot rather than an
+    unreliable guess at chart boundaries. Snapshots include chart labels.
+    """
+    pages = [_extract_lines(page) for page in document]
     body_size = _body_font_size(pages)
     sections: list[str] = []
-    for page_number, lines in enumerate(pages, start=1):
-        page_lines = _page_to_markdown(lines, body_size)
-        page_content = "\n".join(page_lines).strip()
+    images: list[ImageAsset] = []
+    image_bytes = 0
+
+    def capture(page: fitz.Page, rect: fitz.Rect, number: int, label: str) -> Line:
+        nonlocal image_bytes
+        if len(images) >= MAX_IMAGE_COUNT:
+            raise GraphicsLimitError("Too many graphics. Split this PDF into smaller files.")
+        # Keep output bounded even for unusually large PDF page dimensions.
+        scale = min(2.0, 1600 / max(rect.width, rect.height))
+        pixmap = page.get_pixmap(matrix=fitz.Matrix(scale, scale), clip=rect, alpha=False)
+        content = pixmap.tobytes("png")
+        image_bytes += len(content)
+        if image_bytes > MAX_IMAGE_BYTES:
+            raise GraphicsLimitError("Graphics exceed 32 MB. Split this PDF into smaller files.")
+        path = f"images/page-{number:03d}-{len(images) + 1:04d}.png"
+        images.append(ImageAsset(path, base64.b64encode(content).decode("ascii")))
+        return Line(f"![{label}]({path})", 0, False, rect.y0, True)
+
+    for page_number, page in enumerate(document, start=1):
+        lines = list(pages[page_number - 1])
+        if page.get_drawings():
+            # A faithful visual fallback for vector charts, diagrams and tables.
+            snapshot = capture(page, page.rect, page_number,
+                               f"Page {page_number} visual reference (includes graphics and text)")
+            lines.append(Line(snapshot.text, 0, False, page.rect.y1, True))
+        else:
+            seen: set[tuple[float, ...]] = set()
+            for info in page.get_image_info():
+                # Image coordinates are unrotated, whereas rendering uses the
+                # displayed page. Transform before clipping or ordering.
+                rect = fitz.Rect(info["bbox"]) * page.rotation_matrix
+                rect &= page.rect
+                if rect.is_empty or rect.is_infinite:
+                    continue
+                key = tuple(round(value, 2) for value in rect)
+                if key in seen:
+                    continue
+                seen.add(key)
+                image = capture(page, rect, page_number,
+                                f"Image on page {page_number}")
+                # Existing text positions are in unrotated coordinates.
+                lines.append(Line(image.text, 0, False, float(info["bbox"][1]), True))
+            if seen:
+                lines.sort(key=lambda line: line.y)
+        page_content = "\n".join(_page_to_markdown(lines, body_size)).strip()
         marker = f"<!-- Page {page_number} -->"
         sections.append(f"{marker}\n\n{page_content}" if page_content else marker)
 
-    return "\n\n".join(sections).strip() + "\n"
+    if not any(pages) and not images:
+        raise EmptyPDFError("This PDF contains no extractable text or graphics.")
+    return Conversion("\n\n".join(sections).strip() + "\n", images)
+
+
+def pdf_to_markdown(document: fitz.Document) -> str:
+    """Compatibility helper; use convert_document to also retrieve image files."""
+    return convert_document(document).markdown

@@ -15,6 +15,7 @@ type ConversionResult = {
   filename: string;
   markdown: string;
   page_count: number;
+  images: Array<{ path: string; content: string }>;
 };
 
 type BatchStatus = "queued" | "converting" | "done" | "error";
@@ -34,7 +35,7 @@ declare global {
       api?: {
         save_markdown: (filename: string, content: string) => Promise<boolean>;
         save_zip: (
-          files: Array<{ path: string; content: string }>,
+          files: ArchiveEntry[],
         ) => Promise<boolean>;
       };
     };
@@ -59,6 +60,37 @@ function downloadBlob(blob: Blob, filename: string) {
 function markdownPath(item: BatchItem) {
   const path = item.relativePath || item.file.name;
   return path.replace(/\.pdf$/i, ".md");
+}
+
+type ArchiveEntry = { path: string; content: string; encoding?: "base64" };
+
+function archiveEntries(item: BatchItem, prefix = ""): ArchiveEntry[] {
+  if (!item.result) return [];
+  const name = item.result.filename;
+  return [
+    { path: prefix + name, content: item.result.markdown },
+    ...(item.result.images ?? []).map((image) => ({
+      path: prefix + image.path,
+      content: image.content,
+      encoding: "base64" as const,
+    })),
+  ];
+}
+
+async function saveArchive(entries: ArchiveEntry[], filename: string) {
+  const nativeSave = window.pywebview?.api?.save_zip;
+  if (nativeSave) {
+    await nativeSave(entries);
+    return;
+  }
+  const JSZip = (await import("jszip")).default;
+  const zip = new JSZip();
+  entries.forEach((entry) => zip.file(entry.path, entry.content, {
+    base64: entry.encoding === "base64",
+  }));
+  downloadBlob(await zip.generateAsync({
+    type: "blob", compression: "DEFLATE", compressionOptions: { level: 6 },
+  }), filename);
 }
 
 export default function Home() {
@@ -239,7 +271,19 @@ export default function Home() {
   }
 
   async function downloadOne(item: BatchItem) {
-    if (!item.result) return;
+    if (!item.result || zipping) return;
+    if (item.result.images?.length) {
+      setZipping(true);
+      setError("");
+      try {
+        await saveArchive(archiveEntries(item), item.result.filename.replace(/\.md$/i, ".zip"));
+      } catch {
+        setError("The ZIP file could not be saved.");
+      } finally {
+        setZipping(false);
+      }
+      return;
+    }
     const filename =
       markdownPath(item).split("/").pop() ?? item.result.filename;
     const nativeSave = window.pywebview?.api?.save_markdown;
@@ -263,25 +307,18 @@ export default function Home() {
     setZipping(true);
     setError("");
     try {
-      const nativeSave = window.pywebview?.api?.save_zip;
-      if (nativeSave) {
-        await nativeSave(
-          ready.map((item) => ({
-            path: markdownPath(item),
-            content: item.result!.markdown,
-          })),
-        );
-        return;
-      }
-      const JSZip = (await import("jszip")).default;
-      const zip = new JSZip();
-      ready.forEach((item) => zip.file(markdownPath(item), item.result!.markdown));
-      const blob = await zip.generateAsync({
-        type: "blob",
-        compression: "DEFLATE",
-        compressionOptions: { level: 6 },
+      const entries: ArchiveEntry[] = [];
+      const used = new Set<string>();
+      ready.forEach((item) => {
+        // Give every PDF its own folder so generic image names cannot collide.
+        const base = item.relativePath || item.file.name;
+        let folder = base;
+        let suffix = 2;
+        while (used.has(folder.toLowerCase())) folder = `${base}-${suffix++}`;
+        used.add(folder.toLowerCase());
+        entries.push(...archiveEntries(item, `${folder}/`));
       });
-      downloadBlob(blob, "paperdown-markdown.zip");
+      await saveArchive(entries, "paperdown-markdown.zip");
     } catch {
       setError("The ZIP file could not be saved.");
     } finally {
@@ -313,7 +350,7 @@ export default function Home() {
         <h1>Turn documents into<br />clean Markdown.</h1>
         <p className="lede">
           Drop in one PDF or a whole folder. Convert up to 100 documents in one
-          local batch—with headings, lists, and page markers preserved.
+          local batch, with text and graphics preserved.
         </p>
       </section>
 
@@ -440,7 +477,7 @@ export default function Home() {
             <span aria-hidden="true">⌂</span>
             <div>
               <strong>Your files stay on your machine.</strong>
-              <p>Three files convert at a time to keep large batches stable.</p>
+              <p>Graphics are kept as images. Scanned text stays in the image, with no OCR.</p>
             </div>
           </div>
         </div>
@@ -451,7 +488,7 @@ export default function Home() {
               <span className="preview-label">MARKDOWN</span>
               {activeItem ? (
                 <span className="page-count">
-                  {activeItem.file.name} · {activeItem.result?.page_count} pages
+                  {activeItem.file.name} · {activeItem.result?.page_count} pages{activeItem.result?.images?.length ? ` · ${activeItem.result.images.length} images` : ""}
                 </span>
               ) : null}
             </div>
@@ -465,8 +502,8 @@ export default function Home() {
                     Source
                   </button>
                 </div>
-                <button className="download-button" onClick={() => void downloadOne(activeItem)}>
-                  Download .md
+                <button className="download-button" disabled={zipping} onClick={() => void downloadOne(activeItem)}>
+                  {activeItem.result?.images?.length ? "Download ZIP with images" : "Download .md"}
                 </button>
               </div>
             ) : null}
@@ -476,7 +513,15 @@ export default function Home() {
             {activeItem?.result ? (
               view === "preview" ? (
                 <article className="markdown">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    components={{
+                      img: ({ src, alt }) => {
+                        const image = activeItem.result?.images?.find((asset) => asset.path === src);
+                        return image ? <img src={`data:image/png;base64,${image.content}`} alt={alt ?? "PDF graphic"} /> : null;
+                      },
+                    }}
+                  >
                     {activeItem.result.markdown}
                   </ReactMarkdown>
                 </article>

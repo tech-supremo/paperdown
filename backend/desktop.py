@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import os
 import socket
 import threading
@@ -56,7 +57,9 @@ class DesktopApi:
             for item in files:
                 archive.writestr(
                     safe_archive_path(str(item.get("path", "document.md"))),
-                    str(item.get("content", "")),
+                    base64.b64decode(item.get("content", ""), validate=True)
+                    if item.get("encoding") == "base64"
+                    else str(item.get("content", "")),
                 )
         return True
 
