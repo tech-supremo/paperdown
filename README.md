@@ -8,6 +8,10 @@ No paid API, cloud account, or external processing is required.
 
 ## Desktop installers
 
+Download the latest Mac and Windows installers from [Releases](https://github.com/tech-supremo/paperdown/releases/latest).
+Already installed an older version? Follow [UPGRADE.md](UPGRADE.md) to replace it.
+No separate patch installer is needed.
+
 Paperdown can also be packaged as a self-contained desktop application. People
 using an installer do not need Python, Node.js, or Terminal. Closing the native
 Paperdown window also stops its private localhost service.

@@ -20,7 +20,7 @@ MAX_FILE_SIZE = 25 * 1024 * 1024
 MAX_PAGES = 200
 CHUNK_SIZE = 1024 * 1024
 
-app = FastAPI(title="Local PDF to Markdown", version="1.0.0")
+app = FastAPI(title="Local PDF to Markdown", version="1.1.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
