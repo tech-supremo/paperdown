@@ -2,7 +2,7 @@
 
 Paperdown is a fully local PDF-to-Markdown web app. The browser sends one PDF
 to a FastAPI server running on your machine. PyMuPDF extracts the text and basic
-font metadata, then the backend turns it into readable Markdown.
+font metadata, then the backend turns it into readable Markdown with local image files.
 
 No paid API, cloud account, or external processing is required.
 
@@ -30,13 +30,16 @@ Developer ID and Windows code-signing certificates.
 - Whole-folder selection for batches of up to 100 PDFs
 - Three-at-a-time conversion queue with per-file progress and errors
 - Individual Markdown downloads or one ZIP preserving folder structure
+- Embedded pictures preserved as PNG crops near the matching text
+- Full-page visual references for pages with vector charts, diagrams or tables
+- Markdown and images bundled in ZIP downloads, with image previews
 - Text extraction using PyMuPDF
 - Heading detection based on relative font size and bold weight
 - Preservation of common bullet and numbered-list markers
 - `<!-- Page N -->` comments between every source page
 - Rendered Markdown preview and raw-source view
 - One-click `.md` download
-- Friendly errors for invalid, empty, image-only, password-protected, oversized,
+- Friendly errors for invalid, empty, password-protected, oversized,
   or very long PDFs
 
 ## Requirements
@@ -87,7 +90,7 @@ With the backend virtual environment active:
 
 ```bash
 cd backend
-python -m pip install pytest
+python -m pip install -r requirements-dev.txt
 pytest
 ```
 
@@ -117,7 +120,8 @@ normalizes common list markers to Markdown. It also joins obvious wrapped lines.
 Every page begins with a page comment.
 
 PDF is a visual format, so no converter can perfectly recover complex layouts.
-Scanned/image-only PDFs need OCR, which this app intentionally does not perform.
+Scanned/image-only PDFs are preserved as images. Text inside those images is not
+extracted because this app does not perform OCR.
 Tables, multi-column documents, and unusual typography may need light cleanup in
 the downloaded Markdown.
 
@@ -129,3 +133,24 @@ the downloaded Markdown.
 - To change the file or page limits, edit `MAX_FILE_SIZE` and `MAX_PAGES` in
   `backend/app/main.py`, then update the matching UI text in
   `frontend/app/page.tsx`.
+
+## Graphics and downloads
+
+Embedded pictures are rendered as PNG crops of their visible page regions, placed
+near the extracted text in page order. PDFs with vector drawings get a full-page
+visual reference after that page's text. This deliberately preserves chart labels
+and context, but may repeat text and also capture decorative lines or table borders.
+Complex columns and overlapping graphics may still need manual cleanup. Images
+are not interpreted or described by AI.
+
+For a document with graphics, **Download ZIP with images** includes its Markdown
+and an `images/` folder. Extract the ZIP and keep that folder beside the Markdown.
+Text-only files still offer a standalone `.md` download. Batch ZIPs preserve the
+source folder hierarchy and give every PDF its own folder to avoid image-name
+collisions. The desktop app uses its native save dialog for both formats.
+
+PNG output is capped at 1,600 pixels on the longest side, so this is a readable
+visual reference rather than a lossless export of original image files. Conversion
+stops with an error if graphics exceed 32 MB or 1,000 images per PDF. Everything
+runs locally and stays in memory. Existing desktop installations need a rebuilt
+installer to get this feature.
